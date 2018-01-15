@@ -2781,7 +2781,8 @@ void parse_arg(int key, char *arg)
 			int n = 0;
 			int ngpus = cuda_num_devices();
 			uint32_t last = 0;
-			char * pch = strtok(arg,",");
+			char * pch = strtok(arg, ",");
+
 			while (pch != NULL) {
 				d = atof(pch);
 				v = (uint32_t) d;
@@ -3195,7 +3196,7 @@ void parse_arg(int key, char *arg)
 			char * pch = strtok (arg,",");
 			opt_n_threads = 0;
 			while (pch != NULL && opt_n_threads < MAX_GPUS) {
-				if (pch[0] >= '0' && pch[0] <= '9' && pch[1] == '\0')
+				if (pch[0] >= '0' && pch[0] <= '9' && strlen(pch) <= 2)
 				{
 					if (atoi(pch) < ngpus)
 						device_map[opt_n_threads++] = atoi(pch);
@@ -3597,14 +3598,17 @@ int main(int argc, char *argv[])
 	// Prevent windows to sleep while mining
 	SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
 
+	// Enable windows high precision timer
+	timeBeginPeriod(1);
+
 #endif
 	if (opt_affinity != -1) {
 		if (!opt_quiet)
-			applog(LOG_DEBUG, "Binding process to cpu mask %x", opt_affinity);
+			applog(LOG_DEBUG, "Binding process to CPU mask %x", opt_affinity);
 		affine_to_cpu_mask(-1, (unsigned long)opt_affinity);
 	}
 	if (active_gpus == 0) {
-		applog(LOG_ERR, "No CUDA devices found! terminating.");
+		applog(LOG_ERR, "No CUDA devices found! Terminating.");
 		exit(1);
 	}
 	if (!opt_n_threads)
@@ -3704,12 +3708,7 @@ int main(int argc, char *argv[])
 		}
 	}
 #endif
-	// force reinit to set default device flags
-	if (opt_cudaschedule >= 0 && !hnvml) {
-		for (int n=0; n < active_gpus; n++) {
-			cuda_reset_device(n, NULL);
-		}
-	}
+
 #ifdef WIN32
 	if (!hnvml && nvapi_init() == 0) {
 		if (!opt_quiet)
@@ -3717,9 +3716,15 @@ int main(int argc, char *argv[])
 		cuda_devicenames(); // refresh gpu vendor name
 	}
 #endif
-	else if (!hnvml)
-		if (!opt_quiet)
+	else if (!hnvml && !opt_quiet)
 			applog(LOG_INFO, "GPU monitoring is not available.");
+
+	// force reinit to set default device flags
+	if (opt_cudaschedule >= 0 && !hnvml) {
+		for (int n = 0; n < active_gpus; n++) {
+			cuda_reset_device(n, NULL);
+		}
+	}
 #endif
 
 	if (opt_api_listen) {
@@ -3774,18 +3779,15 @@ int main(int argc, char *argv[])
 
 	applog(LOG_INFO, "%d miner thread%s started, using '%s' algorithm.", (opt_n_threads-bad_devices), (opt_n_threads-bad_devices) > 1 ? "s":"", algo_names[opt_algo]);
 
-#ifdef WIN32
-	timeBeginPeriod(1); // enable high timer precision (similar to Google Chrome Trick)
-#endif
-
 	/* main loop - simply wait for workio thread to exit */
 	pthread_join(thr_info[work_thr_id].pth[0], NULL);
 
-	/* wait for mining/monitoring threads */
-	for (i = 0; i < opt_n_threads; i++){
+	/* wait for mining threads */
+	for (i = 0; i < opt_n_threads; i++) {
 		pthread_join(thr_info[i].pth[0], NULL);
 		pthread_join(thr_info[i].pth[1], NULL);
 	}
+
 	if (opt_debug)
 		applog(LOG_DEBUG, "workio thread dead, exiting.");
 
